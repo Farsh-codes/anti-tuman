@@ -1578,10 +1578,13 @@
     const toast = document.getElementById("statusToast");
     let revealTimer = null;
 
-    function notify(msg) {
+    function notify(msg, duration = 2800) {
       toast.textContent = msg;
       clearTimeout(notify._t);
-      notify._t = setTimeout(() => { toast.textContent = ""; }, 2800);
+      notify._t = null;
+      if (duration > 0) {
+        notify._t = setTimeout(() => { toast.textContent = ""; }, duration);
+      }
     }
 
     function loadHistory() {
@@ -1742,7 +1745,7 @@
 
       const buttons = [document.getElementById("clearFogBtn"), document.getElementById("curtainClearBtn"), document.getElementById("shortenBtn"), document.getElementById("heroClearFogBtn")];
       buttons.forEach(b => { if (b) b.disabled = true; });
-      notify(action === "shorten" ? "Сокращаю текст через Gemini…" : "Gemini изучает материал…");
+      notify(action === "shorten" ? "Сокращаю текст через Gemini…" : "Gemini изучает материал…", 0);
       if (photoFile) document.getElementById("photoOcrStatus").textContent = "Фото отправлено на распознавание…";
       if (audioFile) document.getElementById("audioTranscriptionStatus").textContent = "Аудио отправлено на расшифровку…";
       try {
@@ -1757,11 +1760,24 @@
         };
         if (photoFile) payload.image = { data: await fileAsBase64(photoFile), mimeType: photoFile.type || "image/jpeg" };
         if (audioFile) payload.audio = { data: await fileAsBase64(audioFile), mimeType: audioFile.type || "audio/mpeg" };
-        const response = await fetch(API_URL, {
-          method: "POST",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify(payload)
-        });
+        const controller = new AbortController();
+        const requestTimer = setTimeout(() => controller.abort(), 130000);
+        let response;
+        try {
+          response = await fetch(API_URL, {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify(payload),
+            signal: controller.signal
+          });
+        } catch (networkError) {
+          if (networkError && networkError.name === "AbortError") {
+            throw new Error("Gemini отвечает слишком долго. Подожди немного и попробуй ещё раз.");
+          }
+          throw new Error("Не удалось связаться с сервером. Проверь интернет и попробуй ещё раз.");
+        } finally {
+          clearTimeout(requestTimer);
+        }
         const result = await response.json().catch(() => ({}));
         if (!response.ok || result.error) throw new Error(result.error || `Ошибка сервера (${response.status})`);
         const parsed = parseModelAnswer(result.answer || result.data || result);
@@ -1774,10 +1790,12 @@
         curtain.classList.add("cleared"); revealBox.classList.add("shown");
         saveHistory([rec, ...loadHistory().filter(x => x.title !== rec.title)].slice(0, 8));
         renderHistory();
-        notify(action === "shorten" ? "Текст сокращён" : "Туман рассеян");
+        notify(action === "shorten" ? "Текст сокращён" : "Туман рассеян", 7000);
       } catch (error) {
         console.error(error);
-        notify(error.message || "Не удалось связаться с Gemini");
+        if (photoFile) document.getElementById("photoOcrStatus").textContent = "Не удалось распознать фото: " + (error.message || "ошибка обработки");
+        if (audioFile) document.getElementById("audioTranscriptionStatus").textContent = "Не удалось расшифровать аудио: " + (error.message || "ошибка обработки");
+        notify(error.message || "Не удалось связаться с Gemini", 12000);
       } finally {
         buttons.forEach(b => { if (b) b.disabled = false; });
       }
