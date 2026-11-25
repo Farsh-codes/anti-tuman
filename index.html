@@ -652,6 +652,11 @@
       margin: 10px 0;
     }
 
+    #customWordsInput { min-height: 40px; }
+    button:disabled { opacity: .58; cursor: wait; }
+    .panel-hint { line-height: 1.45; }
+    #recognizedTextOutput { white-space: pre-wrap; overflow-wrap: anywhere; }
+
     .timecode-row {
       display: flex;
       gap: 8px;
@@ -1074,7 +1079,7 @@
 
           <div id="pane-text" class="source-pane active">
             <label class="field-label" for="topicTitleInput">Тема</label>
-            <input id="topicTitleInput" type="text" value="Эластичность спроса по цене" />
+            <input id="topicTitleInput" type="text" value="" placeholder="Например: фотосинтез, история России..." />
 
             <div class="presets-row">
               <span class="presets-label">Готовые примеры:</span>
@@ -1084,7 +1089,7 @@
             </div>
 
             <label class="field-label" for="rawTextInput">Текст</label>
-            <textarea id="rawTextInput">Эластичность спроса по цене показывает, насколько сильно меняется объём покупок при изменении цены товара. Если цена выросла на 10%, а спрос упал на 25%, спрос называют эластичным — покупатели чувствительны к цене и легко ищут заменители. Если же при росте цены на 10% спрос падает лишь на 2%, спрос неэластичный: людям важен сам товар, например базовые продукты или лекарства.</textarea>
+            <textarea id="rawTextInput" placeholder="Вставь сюда свой текст для разбора..."></textarea>
           </div>
 
           <div id="pane-photo" class="source-pane">
@@ -1093,7 +1098,8 @@
               <input id="photoFileInput" type="file" accept="image/*" />
             </div>
             <label class="field-label" for="photoCaptionInput">Пояснение к снимку</label>
-            <textarea id="photoCaptionInput" style="min-height: 90px;">Схема круговорота воды в природе: испарение, конденсация в облаках, осадки и сток в водоёмы.</textarea>
+            <textarea id="photoCaptionInput" style="min-height: 90px;" placeholder="Необязательно: добавь пояснение к фотографии..."></textarea>
+            <p class="panel-hint" id="photoOcrStatus">Текст с фотографии будет распознан при запуске разбора.</p>
             <div class="photo-preview-wrap" id="photoPreviewBox">
               <span style="color: var(--text-dim); font-size: 0.84rem;">Предпросмотр появится после выбора файла</span>
             </div>
@@ -1103,6 +1109,7 @@
             <label class="field-label" for="audioFileInput">Аудиозапись</label>
             <input id="audioFileInput" type="file" accept="audio/*" />
             <audio id="audioPlayer" controls></audio>
+            <p class="panel-hint" id="audioTranscriptionStatus">Аудиозапись будет отправлена на расшифровку вместе с разбором.</p>
             <label class="field-label" for="markerNoteInput">Заметка к моменту записи</label>
             <div class="timecode-row">
               <input id="markerNoteInput" type="text" placeholder="Важный момент..." />
@@ -1129,8 +1136,25 @@
             </div>
           </div>
 
+          <div class="options-row" style="margin-top: 12px;">
+            <div>
+              <label class="field-label" for="shortenModeSelect">Формат сокращения</label>
+              <select id="shortenModeSelect">
+                <option value="brief">Краткий пересказ</option>
+                <option value="detailed">Подробный конспект</option>
+                <option value="bullets">Тезисы списком</option>
+                <option value="simple">Простыми словами</option>
+                <option value="custom">Заданное число слов</option>
+              </select>
+            </div>
+            <div id="customWordsWrap" style="display:none;">
+              <label class="field-label" for="customWordsInput">Количество слов</label>
+              <input id="customWordsInput" type="number" min="20" max="2000" value="150" />
+            </div>
+          </div>
           <div class="action-footer">
             <button id="clearFogBtn" class="btn primary" type="button">Развеять туман</button>
+            <button id="shortenBtn" class="btn" type="button">Сократить текст</button>
             <button id="resetFogBtn" class="btn" type="button">Скрыть в туман</button>
           </div>
         </div>
@@ -1155,6 +1179,10 @@
                 <p id="outSummary"></p>
               </div>
 
+              <div class="result-block" id="recognizedBlock" style="display:none;">
+                <h3>Распознанный текст</h3>
+                <p id="recognizedTextOutput"></p>
+              </div>
               <div class="result-block">
                 <h3>По шагам</h3>
                 <ol id="outSteps" class="steps-list"></ol>
@@ -1571,31 +1599,6 @@
       } catch {}
     }
 
-    function renderResult(rec) {
-      document.getElementById("outSummary").textContent = rec.summary;
-      const ol = document.getElementById("outSteps");
-      ol.innerHTML = "";
-      rec.steps.forEach((s) => {
-        const li = document.createElement("li");
-        li.textContent = s;
-        ol.appendChild(li);
-      });
-      const qBox = document.getElementById("outQuiz");
-      qBox.innerHTML = "";
-      rec.quiz.forEach((item) => {
-        const card = document.createElement("div");
-        card.className = "quiz-card";
-        const q = document.createElement("div");
-        q.className = "quiz-q";
-        q.textContent = item.q;
-        const a = document.createElement("div");
-        a.className = "quiz-a";
-        a.textContent = item.a;
-        q.addEventListener("click", () => a.classList.toggle("open"));
-        card.append(q, a);
-        qBox.appendChild(card);
-      });
-    }
 
     function renderHistory() {
       const items = loadHistory();
@@ -1656,68 +1659,136 @@
       notify("История очищена");
     });
 
-    function runClearFog() {
-      clearTimeout(revealTimer);
-      const level = document.getElementById("levelSelect").value;
-      const tone = document.getElementById("toneSelect").value;
+    const API_URL = "https://anti-tuman-api.glebm141084.workers.dev";
+    let lastRecognizedText = "";
+    let currentResult = null;
 
-      const title = document.getElementById("topicTitleInput").value.trim() || "Тема";
-      const rawText = document.getElementById("rawTextInput").value.trim();
-      const photoDesc = document.getElementById("photoCaptionInput").value.trim();
-      const markers = Array.from(markersList.querySelectorAll(".marker-chip")).map((m) => m.dataset.markerText);
-      const merged = [rawText, photoDesc, ...markers].filter(Boolean).join(" ");
-      const sentences = merged.replace(/\s+/g, " ").split(/(?<=[.!?…])\s+/).map((s) => s.trim()).filter((s) => s.length > 10);
+    document.getElementById("shortenModeSelect").addEventListener("change", (event) => {
+      document.getElementById("customWordsWrap").style.display = event.target.value === "custom" ? "block" : "none";
+    });
 
-      const lead = sentences[0] || "Материал собран и готов к разбору.";
-      const prefix = level === "simple"
-        ? `Простыми словами о теме «${title}»: `
-        : level === "deep"
-          ? `Логика темы «${title}»: `
-          : `Главное по теме «${title}»: `;
+    function fileAsBase64(file) {
+      return new Promise((resolve, reject) => {
+        const reader = new FileReader();
+        reader.onload = () => resolve(String(reader.result).split(",")[1] || "");
+        reader.onerror = () => reject(new Error("Не удалось прочитать выбранный файл"));
+        reader.readAsDataURL(file);
+      });
+    }
 
-      const summary = tone === "short" ? `${title} — ${lead}` : `${prefix}${lead}`;
-      const steps = sentences.slice(0, tone === "short" ? 2 : 4);
-      if (markers.length) steps.push(`Метки в аудио: ${markers.join("; ")}`);
-      if (!steps.length) steps.push("Добавь текст, описание фото или метку в аудио.");
+    function parseModelAnswer(answer) {
+      if (answer && typeof answer === "object") return answer;
+      const raw = String(answer || "").trim();
+      const cleaned = raw.replace(/^```(?:json)?\s*/i, "").replace(/\s*```$/, "");
+      try { return JSON.parse(cleaned); } catch {}
+      const jsonStart = cleaned.indexOf("{");
+      const jsonEnd = cleaned.lastIndexOf("}");
+      if (jsonStart >= 0 && jsonEnd > jsonStart) {
+        try { return JSON.parse(cleaned.slice(jsonStart, jsonEnd + 1)); } catch {}
+      }
+      return { summary: raw || "Модель не вернула текстовый ответ.", steps: [], quiz: [], recognizedText: "" };
+    }
 
-      const quiz = [
-        { q: `Как объяснить суть темы «${title}» своими словами?`, a: lead },
-        { q: `На чём держится главный пример или шаг в теме «${title}»?`, a: steps[Math.min(1, steps.length - 1)] }
-      ];
-
-      const rec = {
+    function normalizeResult(data, title) {
+      const steps = Array.isArray(data.steps) ? data.steps : (data.steps ? [String(data.steps)] : []);
+      const quiz = Array.isArray(data.quiz) ? data.quiz : [];
+      return {
         id: Date.now(),
         date: new Date().toLocaleString("ru-RU", { day: "2-digit", month: "2-digit", hour: "2-digit", minute: "2-digit" }),
         title,
-        rawText,
-        summary,
-        steps,
-        quiz
+        rawText: document.getElementById("rawTextInput").value.trim(),
+        summary: String(data.summary || data.answer || "Разбор готов."),
+        steps: steps.map(x => typeof x === "string" ? x : String(x.text || x.point || JSON.stringify(x))),
+        quiz: quiz.map(x => ({ q: String(x.q || x.question || "Вопрос"), a: String(x.a || x.answer || "") })),
+        recognizedText: String(data.recognizedText || data.transcription || "")
       };
-
-      renderResult(rec);
-      revealBox.classList.remove("shown");
-      curtain.classList.remove("cleared");
-      void curtain.offsetWidth;
-      curtain.classList.add("dispersing");
-      notify("Туман рассеивается...");
-
-      revealTimer = setTimeout(() => {
-        curtain.classList.add("cleared");
-        revealBox.classList.add("shown");
-
-        const nextHist = [rec, ...loadHistory().filter((x) => x.title !== rec.title)];
-        saveHistory(nextHist);
-        renderHistory();
-        notify("Туман рассеян");
-      }, 950);
     }
 
-    document.getElementById("clearFogBtn").addEventListener("click", runClearFog);
-    document.getElementById("curtainClearBtn").addEventListener("click", runClearFog);
+    function renderResult(rec) {
+      currentResult = rec;
+      document.getElementById("outSummary").textContent = rec.summary;
+      const ol = document.getElementById("outSteps");
+      ol.innerHTML = "";
+      (rec.steps || []).forEach((s) => {
+        const li = document.createElement("li"); li.textContent = s; ol.appendChild(li);
+      });
+      const qBox = document.getElementById("outQuiz");
+      qBox.innerHTML = "";
+      (rec.quiz || []).forEach((item) => {
+        const card = document.createElement("div"); card.className = "quiz-card";
+        const q = document.createElement("div"); q.className = "quiz-q"; q.textContent = item.q;
+        const a = document.createElement("div"); a.className = "quiz-a"; a.textContent = item.a;
+        q.addEventListener("click", () => a.classList.toggle("open"));
+        card.append(q, a); qBox.appendChild(card);
+      });
+      const recognizedBlock = document.getElementById("recognizedBlock");
+      recognizedBlock.style.display = rec.recognizedText ? "block" : "none";
+      document.getElementById("recognizedTextOutput").textContent = rec.recognizedText || "";
+    }
+
+    async function runClearFog(action = "analyze") {
+      clearTimeout(revealTimer);
+      const title = document.getElementById("topicTitleInput").value.trim() || "Материал без названия";
+      const rawText = document.getElementById("rawTextInput").value.trim();
+      const photoCaption = document.getElementById("photoCaptionInput").value.trim();
+      const photoFile = photoFileInput.files && photoFileInput.files[0];
+      const audioFile = audioFileInput.files && audioFileInput.files[0];
+      const markers = Array.from(markersList.querySelectorAll(".marker-chip")).map(m => m.dataset.markerText);
+      if (!rawText && !photoFile && !audioFile && !photoCaption && !markers.length) {
+        notify("Сначала добавь текст, фотографию или аудиозапись"); return;
+      }
+      if (photoFile && photoFile.size > 8 * 1024 * 1024) { notify("Фото слишком большое. Выбери файл до 8 МБ."); return; }
+      if (audioFile && audioFile.size > 12 * 1024 * 1024) { notify("Аудио слишком большое. Выбери файл до 12 МБ."); return; }
+
+      const buttons = [document.getElementById("clearFogBtn"), document.getElementById("curtainClearBtn"), document.getElementById("shortenBtn"), document.getElementById("heroClearFogBtn")];
+      buttons.forEach(b => { if (b) b.disabled = true; });
+      notify(action === "shorten" ? "Сокращаю текст через Gemini…" : "Gemini изучает материал…");
+      if (photoFile) document.getElementById("photoOcrStatus").textContent = "Фото отправлено на распознавание…";
+      if (audioFile) document.getElementById("audioTranscriptionStatus").textContent = "Аудио отправлено на расшифровку…";
+      try {
+        const payload = {
+          action,
+          topic: title,
+          text: [rawText, photoCaption ? "Пояснение к фото: " + photoCaption : "", markers.join("\n")].filter(Boolean).join("\n\n"),
+          level: document.getElementById("levelSelect").value,
+          tone: document.getElementById("toneSelect").value,
+          shortenMode: document.getElementById("shortenModeSelect").value,
+          customWords: Math.min(2000, Math.max(20, Number(document.getElementById("customWordsInput").value) || 150))
+        };
+        if (photoFile) payload.image = { data: await fileAsBase64(photoFile), mimeType: photoFile.type || "image/jpeg" };
+        if (audioFile) payload.audio = { data: await fileAsBase64(audioFile), mimeType: audioFile.type || "audio/mpeg" };
+        const response = await fetch(API_URL, {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify(payload)
+        });
+        const result = await response.json().catch(() => ({}));
+        if (!response.ok || result.error) throw new Error(result.error || `Ошибка сервера (${response.status})`);
+        const parsed = parseModelAnswer(result.answer || result.data || result);
+        const rec = normalizeResult(parsed, title);
+        if (photoFile) document.getElementById("photoOcrStatus").textContent = rec.recognizedText ? "Текст с фотографии распознан." : "Фото обработано. Если нужен точный OCR, проверь распознанный текст в результате.";
+        if (audioFile) document.getElementById("audioTranscriptionStatus").textContent = rec.recognizedText ? "Аудио расшифровано." : "Аудио обработано; отдельный текст расшифровки не получен.";
+        renderResult(rec);
+        revealBox.classList.remove("shown"); curtain.classList.remove("cleared");
+        void curtain.offsetWidth; curtain.classList.add("dispersing");
+        curtain.classList.add("cleared"); revealBox.classList.add("shown");
+        saveHistory([rec, ...loadHistory().filter(x => x.title !== rec.title)].slice(0, 8));
+        renderHistory();
+        notify(action === "shorten" ? "Текст сокращён" : "Туман рассеян");
+      } catch (error) {
+        console.error(error);
+        notify(error.message || "Не удалось связаться с Gemini");
+      } finally {
+        buttons.forEach(b => { if (b) b.disabled = false; });
+      }
+    }
+
+    document.getElementById("clearFogBtn").addEventListener("click", () => runClearFog("analyze"));
+    document.getElementById("curtainClearBtn").addEventListener("click", () => runClearFog("analyze"));
+    document.getElementById("shortenBtn").addEventListener("click", () => runClearFog("shorten"));
     document.getElementById("heroClearFogBtn").addEventListener("click", () => {
       switchView("studio");
-      runClearFog();
+      runClearFog("analyze");
     });
 
     document.getElementById("resetFogBtn").addEventListener("click", () => {
@@ -1731,7 +1802,9 @@
       const title = document.getElementById("topicTitleInput").value.trim() || "Тема";
       const summary = document.getElementById("outSummary").textContent;
       const steps = Array.from(document.querySelectorAll("#outSteps li")).map((li, i) => `${i + 1}. ${li.textContent}`);
-      return [`Анти-туман — ${title}`, "", "Главная суть:", summary, "", "По шагам:", ...steps].join("\n");
+      const recognized = currentResult && currentResult.recognizedText ? ["", "Распознанный текст:", currentResult.recognizedText] : [];
+      const quiz = currentResult && currentResult.quiz ? ["", "Самопроверка:", ...currentResult.quiz.map(x => `Вопрос: ${x.q}\nОтвет: ${x.a}`)] : [];
+      return [`Анти-туман — ${title}`, "", "Главная суть:", summary, "", "По шагам:", ...steps, ...recognized, ...quiz].join("\n");
     }
 
     document.getElementById("copyResultBtn").addEventListener("click", async () => {
