@@ -1097,24 +1097,12 @@
             <div class="photo-preview-wrap" id="photoPreviewBox">
               <span style="color: var(--text-dim); font-size: 0.84rem;">Предпросмотр появится после выбора файла</span>
             </div>
-            <div class="action-footer">
-              <button id="recognizePhotoBtn" class="btn primary" type="button">Распознать текст на фото</button>
-            </div>
-            <div id="photoOcrStatus" class="status-toast" role="status">Распознавание работает на русском и английском языках.</div>
-            <label class="field-label" for="photoOcrText">Распознанный текст (можно редактировать)</label>
-            <textarea id="photoOcrText" placeholder="Здесь появится текст с изображения..."></textarea>
           </div>
 
           <div id="pane-audio" class="source-pane">
             <label class="field-label" for="audioFileInput">Аудиозапись</label>
             <input id="audioFileInput" type="file" accept="audio/*" />
             <audio id="audioPlayer" controls></audio>
-            <div class="action-footer">
-              <button id="transcribeAudioBtn" class="btn primary" type="button">Распознать речь из аудио</button>
-            </div>
-            <div id="audioTranscribeStatus" class="status-toast" role="status">Модель распознавания загрузится при первом запуске. Для работы нужен интернет.</div>
-            <label class="field-label" for="audioTranscriptText">Расшифровка аудио (можно редактировать)</label>
-            <textarea id="audioTranscriptText" placeholder="Здесь появится расшифровка записи..."></textarea>
             <label class="field-label" for="markerNoteInput">Заметка к моменту записи</label>
             <div class="timecode-row">
               <input id="markerNoteInput" type="text" placeholder="Важный момент..." />
@@ -1676,10 +1664,8 @@
       const title = document.getElementById("topicTitleInput").value.trim() || "Тема";
       const rawText = document.getElementById("rawTextInput").value.trim();
       const photoDesc = document.getElementById("photoCaptionInput").value.trim();
-      const photoOcr = document.getElementById("photoOcrText").value.trim();
-      const audioTranscript = document.getElementById("audioTranscriptText").value.trim();
       const markers = Array.from(markersList.querySelectorAll(".marker-chip")).map((m) => m.dataset.markerText);
-      const merged = [rawText, photoDesc, photoOcr, audioTranscript, ...markers].filter(Boolean).join(" ");
+      const merged = [rawText, photoDesc, ...markers].filter(Boolean).join(" ");
       const sentences = merged.replace(/\s+/g, " ").split(/(?<=[.!?…])\s+/).map((s) => s.trim()).filter((s) => s.length > 10);
 
       const lead = sentences[0] || "Материал собран и готов к разбору.";
@@ -1779,130 +1765,6 @@
     });
 
     renderHistory();
-  </script>
-
-  <script type="module">
-    const photoInput = document.getElementById("photoFileInput");
-    const photoButton = document.getElementById("recognizePhotoBtn");
-    const photoStatus = document.getElementById("photoOcrStatus");
-    const photoText = document.getElementById("photoOcrText");
-    const audioInput = document.getElementById("audioFileInput");
-    const audioButton = document.getElementById("transcribeAudioBtn");
-    const audioStatus = document.getElementById("audioTranscribeStatus");
-    const audioText = document.getElementById("audioTranscriptText");
-
-    photoButton.addEventListener("click", async () => {
-      const file = photoInput.files?.[0];
-      if (!file) {
-        photoStatus.textContent = "Сначала выбери изображение.";
-        return;
-      }
-      photoButton.disabled = true;
-      photoStatus.textContent = "Загружаю модуль распознавания текста...";
-      try {
-        const { createWorker } = await import("https://cdn.jsdelivr.net/npm/tesseract.js@5/dist/tesseract.esm.min.js");
-        const worker = await createWorker("rus+eng", 1, {
-          logger: (m) => {
-            if (m.status === "recognizing text") {
-              photoStatus.textContent = `Распознаю текст: ${Math.round((m.progress || 0) * 100)}%`;
-            } else if (m.status) {
-              photoStatus.textContent = `Подготовка: ${m.status}...`;
-            }
-          }
-        });
-        try {
-          const result = await worker.recognize(file);
-          photoText.value = (result.data.text || "").trim();
-          photoStatus.textContent = photoText.value
-            ? "Готово! Проверь распознанный текст и при необходимости исправь ошибки."
-            : "Текст не найден. Попробуй загрузить изображение лучшего качества.";
-        } finally {
-          await worker.terminate();
-        }
-      } catch (error) {
-        console.error("OCR error:", error);
-        photoStatus.textContent = "Не удалось запустить распознавание. Проверь подключение к интернету и попробуй ещё раз.";
-      } finally {
-        photoButton.disabled = false;
-      }
-    });
-
-    let transcriberPromise;
-    audioButton.addEventListener("click", async () => {
-      const file = audioInput.files?.[0];
-      if (!file) {
-        audioStatus.textContent = "Сначала выбери аудиофайл.";
-        return;
-      }
-      audioButton.disabled = true;
-      try {
-        audioStatus.textContent = "Загружаю модель распознавания речи (при первом запуске это может занять время)...";
-        const { pipeline, env } = await import("https://cdn.jsdelivr.net/npm/@xenova/transformers@2.17.2");
-        env.allowLocalModels = false;
-        env.useBrowserCache = true;
-        if (!transcriberPromise) {
-          transcriberPromise = pipeline("automatic-speech-recognition", "Xenova/whisper-tiny", {
-            progress_callback: (p) => {
-              if (p.status === "progress") {
-                audioStatus.textContent = `Загрузка модели: ${Math.round(p.progress || 0)}%`;
-              } else if (p.status === "downloading") {
-                audioStatus.textContent = "Скачиваю модель распознавания речи...";
-              }
-            }
-          });
-        }
-        const transcriber = await transcriberPromise;
-        audioStatus.textContent = "Читаю аудиофайл...";
-        const bytes = await file.arrayBuffer();
-        const AudioContextClass = window.AudioContext || window.webkitAudioContext;
-        if (!AudioContextClass) throw new Error("Web Audio API недоступен в этом браузере");
-        const context = new AudioContextClass();
-        let decoded;
-        try {
-          decoded = await context.decodeAudioData(bytes.slice(0));
-        } finally {
-          await context.close();
-        }
-
-        // Приводим сигнал к моно и частоте 16 кГц, которую ожидает Whisper.
-        const channels = Array.from({ length: decoded.numberOfChannels }, (_, i) => decoded.getChannelData(i));
-        const mono = new Float32Array(decoded.length);
-        for (let i = 0; i < decoded.length; i++) {
-          let sum = 0;
-          for (const channel of channels) sum += channel[i];
-          mono[i] = sum / channels.length;
-        }
-        const targetRate = 16000;
-        const outputLength = Math.ceil(mono.length * targetRate / decoded.sampleRate);
-        const samples = new Float32Array(outputLength);
-        const ratio = decoded.sampleRate / targetRate;
-        for (let i = 0; i < outputLength; i++) {
-          const pos = i * ratio;
-          const left = Math.floor(pos);
-          const right = Math.min(left + 1, mono.length - 1);
-          const weight = pos - left;
-          samples[i] = mono[left] * (1 - weight) + mono[right] * weight;
-        }
-
-        audioStatus.textContent = "Распознаю речь. Обработка длинной записи может занять несколько минут...";
-        const result = await transcriber(samples, {
-          chunk_length_s: 30,
-          stride_length_s: 5,
-          language: "russian",
-          task: "transcribe",
-          return_timestamps: false
-        });
-        audioText.value = (result.text || "").trim();
-        audioStatus.textContent = audioText.value
-          ? "Готово! Проверь расшифровку и при необходимости отредактируй её."
-          : "Речь не распознана. Попробуй запись с более чётким звуком.";
-      } catch (error) {
-        console.error("Audio transcription error:", error);
-        audioStatus.textContent = "Не удалось распознать аудио. Проверь формат файла, память устройства и подключение к интернету.";
-      } finally {
-        audioButton.disabled = false;
-      }
-    });
   </script>
 </body>
 </html>
