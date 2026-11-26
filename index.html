@@ -989,14 +989,21 @@
           <button class="theme-chip" data-theme="pink" type="button"><span class="swatch-dot" style="background:#e56ba9;"></span>Розовый</button>
         </div>
 
-        <div class="audio-control-group">
-          <button id="audioToggleBtn" class="btn" type="button">
-            <span id="audioLabel">Lo-fi: выкл</span>
-          </button>
-          <span style="font-size:0.76rem;color:var(--text-muted);white-space:nowrap;">Громкость:</span>
-          <input id="volumeSlider" class="volume-slider" type="range" min="0" max="100" value="75" aria-label="Громкость lo-fi" title="Громкость lo-fi" />
+        <div class="audio-control-group" style="display:none" aria-hidden="true">
+          <button id="audioToggleBtn" class="btn" type="button"><span id="audioLabel">Lo-fi: выкл</span></button>
+          <input id="volumeSlider" class="volume-slider" type="range" min="0" max="100" value="75" />
           <span id="volumeLabel" class="volume-pct">75%</span>
         </div>
+        <div class="audio-control-group" id="albumPlayerControls" style="flex-wrap:wrap;max-width:100%;">
+          <span id="albumTrackTitle" style="font-size:0.78rem;color:var(--text-muted);max-width:150px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;">Chrono swuM · загрузка…</span>
+          <button id="albumPrevBtn" class="btn sm" type="button" aria-label="Предыдущий трек">◀</button>
+          <button id="albumPlayBtn" class="btn sm" type="button">▶</button>
+          <button id="albumNextBtn" class="btn sm" type="button" aria-label="Следующий трек">▶|</button>
+          <select id="albumTrackSelect" aria-label="Выбрать трек" style="max-width:140px;padding:6px;font-size:0.78rem;"><option>Загрузка списка…</option></select>
+          <input id="albumVolume" type="range" min="0" max="100" value="65" aria-label="Громкость музыки" title="Громкость музыки" style="width:70px;" />
+          <span id="albumVolumeLabel" class="volume-pct">65%</span>
+        </div>
+        <div id="youtubeAlbumPlayer" style="width:200px;height:200px;flex:0 0 200px;border-radius:10px;overflow:hidden;" aria-label="Плеер альбома YouTube"></div>
       </div>
     </header>
 
@@ -1157,6 +1164,7 @@
             <button id="shortenBtn" class="btn" type="button">Сократить текст</button>
             <button id="resetFogBtn" class="btn" type="button">Скрыть в туман</button>
           </div>
+          <p id="quotaStatus" class="panel-hint" style="margin:8px 0 0;">Бесплатно: до 5 разборов в сутки. Лимит общий для текста, фото и аудио.</p>
         </div>
 
         <div class="panel">
@@ -1226,6 +1234,13 @@
 
         <div class="story-box">
           Пространство для глубокого сосредоточения и ясной мысли среди бесконечного потока записей и тем. Проект создал обычный школьник, который на собственном опыте знал эту проблему и собрал инструмент, помогающий шаг за шагом добраться до сути. Исходный код формируется по запросу при открытии этой вкладки.
+        </div>
+
+        <div class="story-box" style="margin-top:16px;">
+          <strong>Спасибо, что пользуешься «Анти-туманом»!</strong><br>
+          Проект развивается постепенно. Впереди — улучшение распознавания фото и аудио, новые возможности и дополнительные режимы. Спасибо за поддержку и обратную связь.
+          <p style="margin:14px 0 0;"><a class="btn primary" href="https://pay.cloudtips.ru/p/711ac34e" target="_blank" rel="noopener noreferrer" style="display:inline-block;text-decoration:none;">Поддержать Анти-туман</a></p>
+          <p class="panel-hint" style="margin:8px 0 0;">Любая сумма помогает развивать проект. Спасибо за поддержку! ❤️</p>
         </div>
 
         <div class="code-viewer">
@@ -1422,7 +1437,7 @@
     function syncAudio(on) {
       audioBtn.classList.toggle("audio-on", on);
       audioLabel.textContent = on ? "Lo-fi: вкл" : "Lo-fi: выкл";
-      heroSoundBtn.textContent = on ? "Выключить lo-fi" : "Включить lo-fi";
+      heroSoundBtn.textContent = "Музыка: Chrono swuM";
     }
 
     const initialVol = loadSavedVolume();
@@ -1435,10 +1450,70 @@
     });
 
     audioBtn.addEventListener("click", () => syncAudio(lofiSound.toggle()));
-    heroSoundBtn.addEventListener("click", () => syncAudio(lofiSound.toggle()));
+    heroSoundBtn.addEventListener("click", () => document.getElementById("albumPlayBtn").click());
 
     // По умолчанию lo-fi выключен при входе
     syncAudio(false);
+
+    // Официальный YouTube-плеер альбома Chrono swuM. Воспроизведение начинается только после нажатия пользователя.
+    const ALBUM_PLAYLIST_ID = "PL6NdkXsPL07LBOz-XhgCJJGlI4jarMKzp";
+    let albumPlayer = null;
+    let albumReady = false;
+    let albumList = [];
+    const albumTitle = document.getElementById("albumTrackTitle");
+    const albumSelect = document.getElementById("albumTrackSelect");
+    function updateAlbumTrack() {
+      if (!albumPlayer || !albumReady) return;
+      const data = albumPlayer.getVideoData ? albumPlayer.getVideoData() : {};
+      const title = data && data.title ? data.title : "Chrono swuM";
+      albumTitle.textContent = title;
+      const index = albumPlayer.getPlaylistIndex ? albumPlayer.getPlaylistIndex() : -1;
+      if (index >= 0 && albumSelect.options.length > index) albumSelect.value = String(index);
+      const state = albumPlayer.getPlayerState ? albumPlayer.getPlayerState() : -1;
+      document.getElementById("albumPlayBtn").textContent = state === 1 ? "Ⅱ" : "▶";
+    }
+    window.onYouTubeIframeAPIReady = function () {
+      albumPlayer = new YT.Player("youtubeAlbumPlayer", {
+        width: "200", height: "200", videoId: "",
+        playerVars: { listType: "playlist", list: ALBUM_PLAYLIST_ID, index: 0, playsinline: 1, rel: 0 },
+        events: {
+          onReady: function (event) {
+            albumReady = true;
+            event.target.cuePlaylist({ listType: "playlist", list: ALBUM_PLAYLIST_ID, index: 0 });
+            event.target.setVolume(Number(document.getElementById("albumVolume").value));
+            setTimeout(function () {
+              albumList = event.target.getPlaylist ? (event.target.getPlaylist() || []) : [];
+              albumSelect.innerHTML = "";
+              if (!albumList.length) {
+                const opt = document.createElement("option"); opt.textContent = "Альбом YouTube"; opt.value = "0"; albumSelect.appendChild(opt);
+              } else {
+                albumList.forEach(function (id, index) {
+                  const opt = document.createElement("option"); opt.value = String(index); opt.textContent = "Трек " + (index + 1); albumSelect.appendChild(opt);
+                });
+              }
+              updateAlbumTrack();
+            }, 1400);
+          },
+          onStateChange: updateAlbumTrack,
+          onError: function () { albumTitle.textContent = "Не удалось загрузить альбом"; }
+        }
+      });
+    };
+    const ytScript = document.createElement("script");
+    ytScript.src = "https://www.youtube.com/iframe_api";
+    document.head.appendChild(ytScript);
+    document.getElementById("albumPlayBtn").addEventListener("click", function () {
+      if (!albumReady || !albumPlayer) { albumTitle.textContent = "Плеер загружается…"; return; }
+      if (albumPlayer.getPlayerState() === 1) albumPlayer.pauseVideo(); else albumPlayer.playVideo();
+      setTimeout(updateAlbumTrack, 250);
+    });
+    document.getElementById("albumPrevBtn").addEventListener("click", function () { if (albumReady) { albumPlayer.previousVideo(); setTimeout(updateAlbumTrack, 400); } });
+    document.getElementById("albumNextBtn").addEventListener("click", function () { if (albumReady) { albumPlayer.nextVideo(); setTimeout(updateAlbumTrack, 400); } });
+    albumSelect.addEventListener("change", function () { if (albumReady) { albumPlayer.playVideoAt(Number(albumSelect.value)); setTimeout(updateAlbumTrack, 400); } });
+    document.getElementById("albumVolume").addEventListener("input", function (event) {
+      const v = Number(event.target.value); document.getElementById("albumVolumeLabel").textContent = v + "%";
+      if (albumReady) albumPlayer.setVolume(v);
+    });
 
     function applyTheme(theme) {
       const validThemes = ["blue", "green", "mint", "cyan", "gray", "black", "pink"];
@@ -1494,9 +1569,40 @@
       }
     };
 
+    function clearSourceInput(source) {
+      if (source === "text") {
+        document.getElementById("rawTextInput").value = "";
+      } else if (source === "photo") {
+        const input = document.getElementById("photoFileInput");
+        input.value = "";
+        const preview = document.getElementById("photoPreviewBox");
+        if (preview.dataset.objectUrl) URL.revokeObjectURL(preview.dataset.objectUrl);
+        delete preview.dataset.objectUrl;
+        preview.innerHTML = '<span style="color: var(--text-dim); font-size: 0.84rem;">Предпросмотр появится после выбора файла</span>';
+        document.getElementById("photoCaptionInput").value = "";
+        document.getElementById("photoOcrStatus").textContent = "Текст с фотографии будет распознан при запуске разбора.";
+      } else if (source === "audio") {
+        const input = document.getElementById("audioFileInput");
+        input.value = "";
+        const player = document.getElementById("audioPlayer");
+        player.pause();
+        if (player.dataset.objectUrl) URL.revokeObjectURL(player.dataset.objectUrl);
+        delete player.dataset.objectUrl;
+        player.removeAttribute("src"); player.load();
+        document.getElementById("markerNoteInput").value = "";
+        document.getElementById("markersList").innerHTML = "";
+        document.getElementById("audioTranscriptionStatus").textContent = "Аудиозапись будет отправлена на расшифровку вместе с разбором.";
+      }
+      document.getElementById("topicTitleInput").value = "";
+      document.getElementById("recognizedBlock").style.display = "none";
+      document.getElementById("recognizedTextOutput").textContent = "";
+    }
+
     document.querySelectorAll(".source-tab").forEach((tab) => {
       tab.addEventListener("click", () => {
-        activeSource = tab.dataset.source;
+        const nextSource = tab.dataset.source;
+        if (nextSource !== activeSource) clearSourceInput(activeSource);
+        activeSource = nextSource;
         document.querySelectorAll(".source-tab").forEach((t) => t.classList.remove("active"));
         document.querySelectorAll(".source-pane").forEach((p) => p.classList.remove("active"));
         tab.classList.add("active");
@@ -1519,7 +1625,9 @@
       const f = photoFileInput.files && photoFileInput.files[0];
       if (!f) return;
       const img = document.createElement("img");
-      img.src = URL.createObjectURL(f);
+      if (photoPreviewBox.dataset.objectUrl) URL.revokeObjectURL(photoPreviewBox.dataset.objectUrl);
+      photoPreviewBox.dataset.objectUrl = URL.createObjectURL(f);
+      img.src = photoPreviewBox.dataset.objectUrl;
       img.alt = "Загруженное фото";
       photoPreviewBox.innerHTML = "";
       photoPreviewBox.appendChild(img);
@@ -1532,7 +1640,11 @@
 
     audioFileInput.addEventListener("change", () => {
       const f = audioFileInput.files && audioFileInput.files[0];
-      if (f) audioPlayer.src = URL.createObjectURL(f);
+      if (f) {
+        if (audioPlayer.dataset.objectUrl) URL.revokeObjectURL(audioPlayer.dataset.objectUrl);
+        audioPlayer.dataset.objectUrl = URL.createObjectURL(f);
+        audioPlayer.src = audioPlayer.dataset.objectUrl;
+      }
     });
 
     function fmtTime(sec) {
@@ -1779,7 +1891,25 @@
           clearTimeout(requestTimer);
         }
         const result = await response.json().catch(() => ({}));
-        if (!response.ok || result.error) throw new Error(result.error || `Ошибка сервера (${response.status})`);
+        if (result.remaining !== undefined) {
+          document.getElementById("quotaStatus").textContent = `Сегодня осталось бесплатных разборов: ${result.remaining} из 5.`;
+        }
+        if (result.resetAt) {
+          const reset = new Date(result.resetAt);
+          document.getElementById("quotaStatus").textContent += ` Сброс: ${reset.toLocaleTimeString([], {hour:"2-digit", minute:"2-digit"})}.`;
+        }
+        if (!response.ok || result.error) {
+          if (result.resetAt && response.status === 429) {
+            const resetAt = new Date(result.resetAt);
+            const updateCountdown = () => {
+              const ms = Math.max(0, resetAt - Date.now());
+              const h = Math.floor(ms / 3600000), m = Math.floor((ms % 3600000) / 60000);
+              document.getElementById("quotaStatus").textContent = `Лимит исчерпан. Новые разборы через ${h} ч ${m} мин.`;
+            };
+            updateCountdown();
+          }
+          throw new Error(result.error || `Ошибка сервера (${response.status})`);
+        }
         const parsed = parseModelAnswer(result.answer || result.data || result);
         const rec = normalizeResult(parsed, title);
         if (photoFile) document.getElementById("photoOcrStatus").textContent = rec.recognizedText ? "Текст с фотографии распознан." : "Фото обработано. Если нужен точный OCR, проверь распознанный текст в результате.";
