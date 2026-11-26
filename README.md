@@ -1,2 +1,4 @@
+
 # Анти-туман
-[открыть сайт](https://farsh-codes.github.io/anti-tuman/)
+
+[🌐 Открыть сайт Анти-туман](https://farsh-codes.github.io/anti-tuman/)
